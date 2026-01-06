@@ -1,6 +1,6 @@
-# 🏦 Aula 5 — Sistema de Pagamentos com Arquitetura de Microsserviços
+# Aula 5 — Sistema de Pagamentos com Arquitetura de Microsserviços
 
-## 📋 Índice
+## Índice
 
 1. [Visão Geral](#visão-geral)
 2. [Linguagens e Tecnologias](#linguagens-e-tecnologias)
@@ -14,22 +14,22 @@
 
 ---
 
-## 🎯 Visão Geral
+## Visão Geral
 
 Este projeto demonstra uma **arquitetura de microsserviços** para processamento de pagamentos, implementando comunicação assíncrona baseada em eventos, baixo acoplamento e resiliência. Cada serviço utiliza a tecnologia mais adequada para seu domínio específico.
 
 ### Objetivos do Projeto
 
-- ✅ Comunicação assíncrona via eventos (RabbitMQ)
-- ✅ Baixo acoplamento entre serviços
-- ✅ Resiliência com Circuit Breaker e Retry
-- ✅ Idempotência para evitar processamento duplicado
-- ✅ Observabilidade completa (métricas, traces, logs)
-- ✅ Tecnologias otimizadas para cada domínio
+- Comunicação assíncrona via eventos (RabbitMQ)
+- Baixo acoplamento entre serviços
+- Resiliência com Circuit Breaker e Retry
+- Idempotência para evitar processamento duplicado
+- Observabilidade completa (métricas, traces, logs)
+- Tecnologias otimizadas para cada domínio
 
 ---
 
-## 💻 Linguagens e Tecnologias
+## Linguagens e Tecnologias
 
 ### Por Serviço
 
@@ -53,7 +53,7 @@ Este projeto demonstra uma **arquitetura de microsserviços** para processamento
 
 ---
 
-## 🏗️ Padrões Arquiteturais
+## Padrões Arquiteturais
 
 ### 1. **Event-Driven Architecture (EDA)**
 - Comunicação assíncrona via eventos
@@ -113,7 +113,7 @@ Este projeto demonstra uma **arquitetura de microsserviços** para processamento
 
 ---
 
-## 🏛️ Arquitetura do Sistema
+## Arquitetura do Sistema
 
 ### Diagrama de Componentes
 
@@ -220,7 +220,7 @@ graph TB
 
 ---
 
-## 🔄 Fluxo Completo de Processamento
+## Fluxo Completo de Processamento
 
 ### Passo a Passo Detalhado
 
@@ -274,7 +274,7 @@ HTTP 201 CREATED
 }
 ```
 
-**⚠️ Importante**: O cliente recebe a resposta **antes** dos serviços consumidores processarem os eventos! O status é `PROCESSING` porque a SAGA ainda está em execução.
+**Importante**: O cliente recebe a resposta **antes** dos serviços consumidores processarem os eventos! O status é `PROCESSING` porque a SAGA ainda está em execução.
 
 #### 8. **Processamento Assíncrono Paralelo**
 
@@ -399,7 +399,7 @@ sequenceDiagram
 
 ---
 
-## 🚀 Como Executar
+## Como Executar
 
 ### Pré-requisitos
 
@@ -453,7 +453,7 @@ notification-service | Notification service listening for payment events...
 antifraud-service   | {"service":"antifraud","event":"ready"}
 ```
 
-**⏱️ Tempo estimado**: 1-2 minutos na primeira execução
+**Tempo estimado**: 1-2 minutos na primeira execução
 
 ### Passo 5: Verificar saúde dos serviços
 
@@ -492,9 +492,9 @@ docker compose down
 
 ---
 
-## 👀 Como Visualizar e Monitorar
+## Como Visualizar e Monitorar
 
-### 1. **RabbitMQ Management UI** 🐰
+### 1. **RabbitMQ Management UI**
 
 **URL**: http://localhost:15672
 
@@ -526,7 +526,7 @@ Filas criadas automaticamente:
 ##### **Verificar Consumidores**
 - Aba **Queues** → Coluna **Consumers** mostra quantos consumidores estão ativos
 
-### 2. **Logs dos Serviços** 📝
+### 2. **Logs dos Serviços**
 
 #### Ver todos os logs
 ```bash
@@ -578,7 +578,7 @@ notification-service | Notification sent: Payment xxx of 100.5 BRL for account a
 antifraud-service | {"service":"antifraud","event":"processed","body":"{...}"}
 ```
 
-### 3. **Prometheus** 📊
+### 3. **Prometheus**
 
 **URL**: http://localhost:9090
 
@@ -588,7 +588,7 @@ antifraud-service | {"service":"antifraud","event":"processed","body":"{...}"}
 3. Use **Graph** para criar queries PromQL
 4. Exemplo de query: `up` (mostra serviços online)
 
-### 4. **Grafana** 📈
+### 4. **Grafana**
 
 **URL**: http://localhost:3000
 
@@ -608,7 +608,7 @@ antifraud-service | {"service":"antifraud","event":"processed","body":"{...}"}
 1. Vá em **Dashboards** → **New Dashboard**
 2. Adicione painéis com métricas do Prometheus
 
-### 5. **Jaeger** 🔍
+### 5. **Jaeger**
 
 **URL**: http://localhost:16686
 
@@ -618,7 +618,7 @@ antifraud-service | {"service":"antifraud","event":"processed","body":"{...}"}
 3. Clique em **Find Traces**
 4. Veja traces distribuídos entre serviços
 
-### 6. **Zipkin** 🔍
+### 6. **Zipkin**
 
 **URL**: http://localhost:9411
 
@@ -627,7 +627,7 @@ antifraud-service | {"service":"antifraud","event":"processed","body":"{...}"}
 2. Clique em **Run Query** para ver traces
 3. Explore dependências entre serviços
 
-### 7. **PostgreSQL** 🐘
+### 7. **PostgreSQL**
 
 Para verificar dados no ledger:
 
@@ -647,7 +647,7 @@ SELECT * FROM ledger_entry ORDER BY created_at DESC LIMIT 10;
 
 ---
 
-## 🧪 Testando o Sistema
+## Testando o Sistema
 
 ### Teste 1: Criar um pagamento básico
 
@@ -670,9 +670,9 @@ curl -X POST http://localhost:8080/payments \
 ```
 
 **O que verificar:**
-1. ✅ Logs em todos os serviços processando o evento
-2. ✅ RabbitMQ Management mostra mensagens sendo processadas
-3. ✅ Entrada criada no PostgreSQL (Ledger Service)
+1. Logs em todos os serviços processando o evento
+2. RabbitMQ Management mostra mensagens sendo processadas
+3. Entrada criada no PostgreSQL (Ledger Service)
 
 ### Teste 2: Testar idempotência
 
@@ -699,9 +699,9 @@ curl -X POST http://localhost:8080/payments \
 ```
 
 **Resultado esperado:**
-- ✅ Primeira requisição: `201 CREATED` com novo `paymentId`
-- ✅ Segunda requisição: `201 CREATED` com **mesmo** `paymentId` (idempotência)
-- ✅ Logs mostram: `"Idempotent request detected, returning existing payment"`
+- Primeira requisição: `201 CREATED` com novo `paymentId`
+- Segunda requisição: `201 CREATED` com **mesmo** `paymentId` (idempotência)
+- Logs mostram: `"Idempotent request detected, returning existing payment"`
 
 ### Teste 3: Múltiplos pagamentos
 
@@ -722,9 +722,9 @@ done
 ```
 
 **O que observar:**
-- ✅ Todos os serviços processam eventos em paralelo
-- ✅ RabbitMQ Management mostra mensagens sendo consumidas
-- ✅ Logs mostram processamento assíncrono
+- Todos os serviços processam eventos em paralelo
+- RabbitMQ Management mostra mensagens sendo consumidas
+- Logs mostram processamento assíncrono
 
 ### Teste 4: Verificar saldos no Balance Service
 
@@ -779,7 +779,7 @@ docker compose exec postgres psql -U postgres -d payment -c "SELECT payment_id, 
 
 ---
 
-## 🔧 Troubleshooting
+## Troubleshooting
 
 ### Problema: Serviços não iniciam
 
@@ -855,7 +855,7 @@ docker compose up --build
 
 ---
 
-## 📚 Conceitos Importantes
+## Conceitos Importantes
 
 ### Por que múltiplas linguagens?
 
@@ -884,7 +884,7 @@ docker compose up --build
 
 ---
 
-## 🎓 Próximos Passos
+## Próximos Passos
 
 1. **Adicionar testes**: Unitários e de integração
 2. **Melhorar observabilidade**: Mais métricas customizadas
@@ -896,7 +896,7 @@ docker compose up --build
 
 ---
 
-## 📞 Suporte
+## Suporte
 
 Em caso de dúvidas ou problemas:
 1. Verifique os logs: `docker compose logs -f`
@@ -906,4 +906,4 @@ Em caso de dúvidas ou problemas:
 
 ---
 
-**Desenvolvido para demonstrar arquitetura de microsserviços com comunicação assíncrona e resiliência.** 🚀
+**Desenvolvido para demonstrar arquitetura de microsserviços com comunicação assíncrona e resiliência.**
