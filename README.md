@@ -91,69 +91,121 @@ Este projeto demonstra uma **arquitetura de microsserviços** para processamento
 - Antifraud Service recebe todos os eventos de pagamento
 - Útil para múltiplos consumidores do mesmo evento
 
+### 9. **SAGA Pattern (Choreography)**
+- **Orquestração distribuída** via eventos para transações distribuídas
+- **Compensação automática** em caso de falha
+- **Estados rastreados** no banco de dados (SagaState)
+- **Eventos de sucesso/falha** publicados por cada serviço
+- **Coordenação assíncrona** sem bloqueio
+
+#### Como funciona:
+1. Payment Service cria `SagaState` com status `PROCESSING`
+2. Publica evento `PaymentInitiated` que dispara processamento paralelo
+3. Cada serviço (Ledger, Balance) publica eventos de sucesso/falha
+4. `SagaOrchestrator` monitora eventos e atualiza estado
+5. Se algum serviço falhar, inicia compensação automática
+6. Serviços que já completaram recebem eventos de compensação
+7. Estado final: `COMPLETED` ou `COMPENSATED`
+
+#### Estados da SAGA:
+- `PENDING` → `PROCESSING` → `COMPLETED` (sucesso)
+- `PROCESSING` → `FAILED` → `COMPENSATING` → `COMPENSATED` (falha com compensação)
+
 ---
 
 ## 🏛️ Arquitetura do Sistema
 
 ### Diagrama de Componentes
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                         CLIENTE HTTP                             │
-└────────────────────────────┬────────────────────────────────────┘
-                             │ POST /payments
-                             │ (Idempotency-Key opcional)
-                             ▼
-┌─────────────────────────────────────────────────────────────────┐
-│              PAYMENT SERVICE (Java/Spring Boot :8080)            │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────┐     │
-│  │  Controller  │→ │   Service    │→ │ Event Publisher  │     │
-│  └──────────────┘  └──────┬───────┘  └────────┬─────────┘     │
-│                            │                   │                │
-│                   ┌────────▼────────┐          │                │
-│                   │ Idempotency    │          │                │
-│                   │ Service        │          │                │
-│                   └────────┬───────┘          │                │
-│                            │                  │                │
-│                   ┌────────▼────────┐         │                │
-│                   │ Circuit Breaker │         │                │
-│                   │ + Retry        │         │                │
-│                   └─────────────────┘         │                │
-└────────────────────────────┬───────────────────┼────────────────┘
-                             │                   │
-                    ┌────────▼────────┐         │
-                    │     REDIS       │         │
-                    │  (Idempotência) │         │
-                    └─────────────────┘         │
-                                                 │
-                             ┌───────────────────┼──────────────────┐
-                             │                   │                  │
-                             ▼                   ▼                  ▼
-                    ┌──────────────────────────────────────────────┐
-                    │          RABBITMQ (Message Broker)           │
-                    │                                              │
-                    │  Exchanges:                                  │
-                    │  • ledger (topic)                            │
-                    │  • balance (topic)                           │
-                    │  • notifications (topic)                     │
-                    │  • payments (fanout)                         │
-                    └──────┬───────────┬───────────┬───────────────┘
-                           │           │           │
-        ┌──────────────────┼───────────┼───────────┼──────────────────┐
-        │                  │           │           │                  │
-        ▼                  ▼           ▼           ▼                  ▼
-┌──────────────┐  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐
-│   LEDGER    │  │   BALANCE    │  │ NOTIFICATION │  │  ANTIFRAUD   │
-│  SERVICE    │  │   SERVICE    │  │   SERVICE    │  │   SERVICE    │
-│  (Java)     │  │    (Go)      │  │ (TypeScript) │  │    (Go)      │
-│   :8081     │  │              │  │    :8082     │  │              │
-└──────┬──────┘  └──────────────┘  └──────────────┘  └──────────────┘
-       │
-       ▼
-┌──────────────┐
-│  POSTGRESQL  │
-│   (Ledger)   │
-└──────────────┘
+```mermaid
+graph TB
+    subgraph "Cliente"
+        Client[Cliente HTTP]
+    end
+    
+    subgraph "Payment Service - Java/Spring Boot :8080"
+        Controller[Payment Controller]
+        PaymentService[Payment Service]
+        Idempotency[Idempotency Service]
+        EventPublisher[Event Publisher]
+        CircuitBreaker[Circuit Breaker + Retry]
+        
+        Controller --> PaymentService
+        PaymentService --> Idempotency
+        PaymentService --> CircuitBreaker
+        PaymentService --> EventPublisher
+    end
+    
+    subgraph "Infraestrutura"
+        Redis[(Redis<br/>Idempotência)]
+        RabbitMQ[RabbitMQ<br/>Message Broker]
+        PostgreSQL[(PostgreSQL<br/>Ledger)]
+        
+        subgraph "Exchanges"
+            LedgerExchange[ledger<br/>topic]
+            BalanceExchange[balance<br/>topic]
+            NotificationExchange[notifications<br/>topic]
+            PaymentExchange[payments<br/>fanout]
+        end
+    end
+    
+    subgraph "Ledger Service - Java/Spring Boot :8081"
+        LedgerConsumer[Ledger Consumer]
+        LedgerService[Ledger Service]
+        LedgerRepo[Ledger Repository]
+        
+        LedgerConsumer --> LedgerService
+        LedgerService --> LedgerRepo
+    end
+    
+    subgraph "Balance Service - Go"
+        BalanceConsumer[Balance Consumer]
+        BalanceStore[Balance Store<br/>In-Memory]
+        
+        BalanceConsumer --> BalanceStore
+    end
+    
+    subgraph "Notification Service - Node.js/TypeScript :8082"
+        NotificationConsumer[Notification Consumer]
+        NotificationService[Notification Service]
+        
+        NotificationConsumer --> NotificationService
+    end
+    
+    subgraph "Antifraud Service - Go"
+        AntifraudConsumer[Antifraud Consumer]
+        AntifraudService[Antifraud Service]
+        
+        AntifraudConsumer --> AntifraudService
+    end
+    
+    Client -->|POST /payments<br/>Idempotency-Key| Controller
+    Idempotency <--> Redis
+    EventPublisher -->|Publish Events| RabbitMQ
+    
+    RabbitMQ --> LedgerExchange
+    RabbitMQ --> BalanceExchange
+    RabbitMQ --> NotificationExchange
+    RabbitMQ --> PaymentExchange
+    
+    LedgerExchange -->|ledger.entry.append| LedgerConsumer
+    BalanceExchange -->|balance.update| BalanceConsumer
+    NotificationExchange -->|payment.created| NotificationConsumer
+    PaymentExchange -->|fanout| AntifraudConsumer
+    
+    LedgerRepo <--> PostgreSQL
+    
+    style Client fill:#e1f5ff
+    style Controller fill:#e1f5ff
+    style PaymentService fill:#e1f5ff
+    style LedgerConsumer fill:#e1f5ff
+    style LedgerService fill:#e1f5ff
+    style BalanceConsumer fill:#90EE90
+    style NotificationConsumer fill:#FFD700
+    style AntifraudConsumer fill:#90EE90
+    style RabbitMQ fill:#FFB6C1
+    style Redis fill:#FF6347
+    style PostgreSQL fill:#87CEEB
 ```
 
 ### Fluxo de Dados
@@ -194,14 +246,17 @@ Idempotency-Key: unique-key-123
 - Se existe resposta anterior → retorna imediatamente (200 OK)
 - Se não existe → continua processamento
 
-#### 4. **Geração de Payment ID**
+#### 4. **Geração de Payment ID e Criação da SAGA**
 - Gera UUID único para o pagamento
+- Cria `SagaState` no PostgreSQL com status `PROCESSING`
+- Armazena informações do pagamento para rastreamento
 
-#### 5. **Publicação de Eventos Assíncronos**
-Payment Service publica **4 eventos simultaneamente** no RabbitMQ:
+#### 5. **Publicação de Evento PaymentInitiated (SAGA)**
+Payment Service publica evento `PaymentInitiated` que dispara processamento paralelo:
 
 | Exchange | Tipo | Routing Key | Consumidor |
 |----------|------|-------------|------------|
+| `saga` | topic | `payment.initiated` | SagaOrchestrator |
 | `ledger` | topic | `entry.append` | Ledger Service |
 | `balance` | topic | `update` | Balance Service |
 | `notifications` | topic | `payment.created` | Notification Service |
@@ -215,29 +270,50 @@ Payment Service publica **4 eventos simultaneamente** no RabbitMQ:
 HTTP 201 CREATED
 {
   "paymentId": "550e8400-e29b-41d4-a716-446655440000",
-  "status": "PROCESSED"
+  "status": "PROCESSING"
 }
 ```
 
-**⚠️ Importante**: O cliente recebe a resposta **antes** dos serviços consumidores processarem os eventos!
+**⚠️ Importante**: O cliente recebe a resposta **antes** dos serviços consumidores processarem os eventos! O status é `PROCESSING` porque a SAGA ainda está em execução.
 
 #### 8. **Processamento Assíncrono Paralelo**
 
-##### 8.1. **Ledger Service** (Java)
+##### 8.1. **Ledger Service** (Java) - Com SAGA
 - Consome evento do exchange `ledger` com routing key `entry.append`
 - Cria **2 entradas imutáveis** no PostgreSQL:
   - **DEBIT**: Conta origem (diminui saldo)
   - **CREDIT**: Conta destino (aumenta saldo)
 - Princípio de **dupla entrada** (double-entry bookkeeping)
+- **Publica evento de sucesso**: `LedgerCompleted` → `saga.ledger.completed`
+- **Em caso de falha**: Publica `LedgerFailed` → `saga.ledger.failed`
 - Log: `"Ledger entry processed successfully"`
 
-##### 8.2. **Balance Service** (Go)
+##### 8.2. **Balance Service** (Go) - Com SAGA
 - Consome evento do exchange `balance` com routing key `update`
 - Atualiza saldo **em memória** (mapa thread-safe)
+- **Armazena operação** para possível compensação
 - Operação: `DEBIT` ou `CREDIT`
+- **Publica evento de sucesso**: `BalanceCompleted` → `saga.balance.completed`
+- **Em caso de falha**: Publica `BalanceFailed` → `saga.balance.failed`
 - Log: `"Balance updated: accountId=acc-123, newBalance=100.50"`
 
-##### 8.3. **Notification Service** (TypeScript)
+##### 8.3. **SagaOrchestrator** (Payment Service)
+- Monitora eventos de sucesso/falha dos serviços
+- Atualiza `SagaState` conforme eventos chegam
+- **Se ambos Ledger e Balance completarem**: Status → `COMPLETED`
+- **Se algum falhar**: Status → `FAILED` → Inicia compensação
+- Publica eventos de compensação para serviços que já completaram
+
+##### 8.4. **Compensação (Rollback)**
+Se algum serviço falhar:
+- **SagaOrchestrator** detecta falha e muda status para `COMPENSATING`
+- Publica eventos de compensação:
+  - `ledger.compensation` → Ledger Service reverte entradas
+  - `balance.compensation` → Balance Service reverte saldo
+- Cada serviço processa compensação e publica `CompensationCompleted`
+- Status final: `COMPENSATED`
+
+##### 8.5. **Notification Service** (TypeScript)
 - Consome evento do exchange `notifications` com routing key `payment.created`
 - Simula envio de notificações:
   - Email
@@ -246,24 +322,23 @@ HTTP 201 CREATED
   - Webhook
 - Log: `"Notification sent: Payment {paymentId}..."`
 
-##### 8.4. **Antifraud Service** (Go)
+##### 8.6. **Antifraud Service** (Go)
 - Consome evento do exchange `payments` (fanout - recebe todos)
 - Valida transação para detectar fraudes
 - Processa de forma assíncrona (não bloqueia pagamento)
 - Log: `{"service":"antifraud","event":"processed"}`
 
-### Diagrama de Sequência
+### Diagrama de Sequência com SAGA
 
 ```mermaid
 sequenceDiagram
     participant C as Cliente
     participant PS as Payment Service
+    participant SO as SagaOrchestrator
     participant R as Redis
     participant MQ as RabbitMQ
     participant LS as Ledger Service
     participant BS as Balance Service
-    participant NS as Notification Service
-    participant AS as Antifraud Service
     participant PG as PostgreSQL
 
     C->>PS: POST /payments<br/>(Idempotency-Key)
@@ -275,32 +350,50 @@ sequenceDiagram
             PS-->>C: 200 OK (payment_id existente)
         else Resposta não existe
             PS->>PS: Gera paymentId
-            PS->>MQ: Publica 4 eventos
+            PS->>PG: CREATE SagaState (PROCESSING)
+            PS->>MQ: PaymentInitiated
             PS->>R: SET idempotency:key (TTL 24h)
-            PS-->>C: 201 CREATED
+            PS-->>C: 201 CREATED (PROCESSING)
         end
     else Sem Idempotency-Key
         PS->>PS: Gera paymentId
-        PS->>MQ: Publica 4 eventos
-        PS-->>C: 201 CREATED
+        PS->>PG: CREATE SagaState (PROCESSING)
+        PS->>MQ: PaymentInitiated
+        PS-->>C: 201 CREATED (PROCESSING)
     end
     
-    Note over MQ,AS: Processamento assíncrono paralelo
+    Note over MQ,BS: Processamento assíncrono paralelo
     
     par Ledger Service
         MQ->>LS: ledger.entry.append
         LS->>PG: INSERT DEBIT
         LS->>PG: INSERT CREDIT
         PG-->>LS: OK
+        LS->>MQ: LedgerCompleted
+        MQ->>SO: saga.ledger.completed
+        SO->>PG: UPDATE SagaState (ledgerCompleted=true)
     and Balance Service
         MQ->>BS: balance.update
         BS->>BS: Atualiza saldo em memória
-    and Notification Service
-        MQ->>NS: payment.created
-        NS->>NS: Envia notificações
-    and Antifraud Service
-        MQ->>AS: payments (fanout)
-        AS->>AS: Valida transação
+        BS->>MQ: BalanceCompleted
+        MQ->>SO: saga.balance.completed
+        SO->>PG: UPDATE SagaState (balanceCompleted=true)
+    end
+    
+    SO->>SO: Verifica se ambos completaram
+    alt Ambos completaram
+        SO->>PG: UPDATE SagaState (COMPLETED)
+    else Algum falhou
+        SO->>PG: UPDATE SagaState (FAILED)
+        SO->>MQ: CompensationRequested
+        Note over MQ,BS: Compensação
+        MQ->>LS: ledger.compensation
+        MQ->>BS: balance.compensation
+        LS->>PG: INSERT entradas de compensação
+        BS->>BS: Reverte saldo
+        LS->>MQ: CompensationCompleted
+        BS->>MQ: CompensationCompleted
+        SO->>PG: UPDATE SagaState (COMPENSATED)
     end
 ```
 
@@ -660,6 +753,30 @@ docker compose exec postgres psql -U postgres -d ledger -c "SELECT * FROM ledger
  tx-xxx-2       | pay-xxx-1  | acc-456    | 100.50 | BRL      | CREDIT| 2024-...
 ```
 
+### Teste 6: Verificar estado da SAGA
+
+```bash
+# Conectar ao PostgreSQL do Payment Service
+docker compose exec postgres psql -U postgres -d payment -c "SELECT payment_id, status, ledger_completed, balance_completed, failure_reason, created_at FROM saga_state ORDER BY created_at DESC LIMIT 5;"
+```
+
+**Resultado esperado:**
+```
+ payment_id |   status    | ledger_completed | balance_completed | failure_reason | created_at
+------------+-------------+------------------+-------------------+----------------+------------
+ pay-xxx-1  | COMPLETED   | true             | true              |                | 2024-...
+ pay-xxx-2  | PROCESSING  | false            | false             |                | 2024-...
+ pay-xxx-3  | COMPENSATED | true             | true              | Balance failed | 2024-...
+```
+
+**Estados possíveis:**
+- `PENDING`: SAGA criada mas ainda não iniciada
+- `PROCESSING`: Em processamento
+- `COMPLETED`: Todos os serviços completaram com sucesso
+- `FAILED`: Algum serviço falhou
+- `COMPENSATING`: Compensação em andamento
+- `COMPENSATED`: Compensação concluída
+
 ---
 
 ## 🔧 Troubleshooting
@@ -772,9 +889,10 @@ docker compose up --build
 1. **Adicionar testes**: Unitários e de integração
 2. **Melhorar observabilidade**: Mais métricas customizadas
 3. **Adicionar autenticação**: JWT, OAuth2
-4. **Implementar Saga Pattern**: Para transações distribuídas
-5. **Adicionar rate limiting**: Proteção contra abuso
-6. **Implementar dead letter queue**: Para mensagens que falharam
+4. **Adicionar rate limiting**: Proteção contra abuso
+5. **Implementar dead letter queue**: Para mensagens que falharam
+6. **Adicionar API para consultar estado da SAGA**: Endpoint GET /payments/{id}/status
+7. **Implementar SAGA Orchestration Pattern**: Alternativa ao Choreography para casos mais complexos
 
 ---
 
@@ -783,7 +901,8 @@ docker compose up --build
 Em caso de dúvidas ou problemas:
 1. Verifique os logs: `docker compose logs -f`
 2. Verifique a saúde dos serviços: RabbitMQ Management UI
-3. Consulte a documentação: `COMMUNICATION.md`
+3. Consulte este README para troubleshooting
+4. Verifique o estado da SAGA no PostgreSQL: `SELECT * FROM saga_state`
 
 ---
 

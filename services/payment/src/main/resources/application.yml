@@ -16,6 +16,20 @@ spring:
     redis:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
+  
+  datasource:
+    url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:payment}
+    username: ${POSTGRES_USER:postgres}
+    password: ${POSTGRES_PASSWORD:postgres}
+  
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
 
 management:
   endpoints:
@@ -35,12 +49,12 @@ resilience4j:
     instances:
       paymentService:
         registerHealthIndicator: true
-        slidingWindowSize: 10
-        minimumNumberOfCalls: 5
-        permittedNumberOfCallsInHalfOpenState: 3
+        slidingWindowSize: 20
+        minimumNumberOfCalls: 10
+        permittedNumberOfCallsInHalfOpenState: 5
         automaticTransitionFromOpenToHalfOpenEnabled: true
-        waitDurationInOpenState: 10s
-        failureRateThreshold: 50
+        waitDurationInOpenState: 30s
+        failureRateThreshold: 60
         eventConsumerBufferSize: 10
   retry:
     instances:
@@ -54,4 +68,8 @@ logging:
   level:
     com.fintechdev: INFO
     org.springframework.amqp: DEBUG
+
+saga:
+  timeout:
+    seconds: 30  # Timeout de 30 segundos para processamento completo
 

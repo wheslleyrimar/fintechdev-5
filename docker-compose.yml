@@ -26,11 +26,13 @@ services:
     ports: ["5432:5432"]
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./init-db.sh:/docker-entrypoint-initdb.d/init-db.sh
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 10s
       timeout: 5s
       retries: 5
+    command: postgres -c max_connections=200
 
   jaeger:
     image: jaegertracing/all-in-one:1.55
@@ -43,8 +45,8 @@ services:
       test: ["CMD-SHELL", "curl -f http://localhost:9411/health || exit 1"]
       interval: 10s
       timeout: 5s
-      retries: 5
-      start_period: 30s
+      retries: 10
+      start_period: 60s
 
   prometheus:
     image: prom/prometheus
@@ -66,10 +68,17 @@ services:
       - RABBITMQ_PASSWORD=guest
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=payment
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
     depends_on:
       rabbitmq:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
 
   ledger-service:
@@ -92,7 +101,7 @@ services:
       postgres:
         condition: service_healthy
       zipkin:
-        condition: service_healthy
+        condition: service_started
 
   balance-service:
     build: ./services/balance

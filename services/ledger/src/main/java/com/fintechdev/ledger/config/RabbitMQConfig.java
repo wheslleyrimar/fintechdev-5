@@ -24,5 +24,23 @@ public class RabbitMQConfig {
             .to(ledgerExchange())
             .with("entry.append");
     }
+    
+    @Bean
+    public TopicExchange sagaExchange() {
+        return new TopicExchange("saga", true, false);
+    }
+    
+    @Bean
+    public Queue ledgerCompensationQueue() {
+        return QueueBuilder.durable("ledger.compensation").build();
+    }
+    
+    @Bean
+    public Binding ledgerCompensationBinding() {
+        return BindingBuilder
+            .bind(ledgerCompensationQueue())
+            .to(ledgerExchange())
+            .with("compensation");
+    }
 }
 

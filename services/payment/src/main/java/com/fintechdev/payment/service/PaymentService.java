@@ -3,12 +3,17 @@ package com.fintechdev.payment.service;
 import com.fintechdev.payment.dto.PaymentRequest;
 import com.fintechdev.payment.dto.PaymentResponse;
 import com.fintechdev.payment.messaging.PaymentEventPublisher;
+import com.fintechdev.payment.model.SagaState;
+import com.fintechdev.payment.repository.SagaStateRepository;
 import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
 import io.github.resilience4j.retry.annotation.Retry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.util.UUID;
 
 @Service
@@ -16,23 +21,24 @@ public class PaymentService {
     
     private static final Logger logger = LoggerFactory.getLogger(PaymentService.class);
     private final IdempotencyService idempotencyService;
-    private final LedgerService ledgerService;
-    private final BalanceService balanceService;
     private final PaymentEventPublisher eventPublisher;
+    private final SagaStateRepository sagaRepository;
+    private final long sagaTimeoutSeconds;
     
     public PaymentService(
             IdempotencyService idempotencyService,
-            LedgerService ledgerService,
-            BalanceService balanceService,
-            PaymentEventPublisher eventPublisher) {
+            PaymentEventPublisher eventPublisher,
+            SagaStateRepository sagaRepository,
+            @Value("${saga.timeout.seconds:30}") long sagaTimeoutSeconds) {
         this.idempotencyService = idempotencyService;
-        this.ledgerService = ledgerService;
-        this.balanceService = balanceService;
         this.eventPublisher = eventPublisher;
+        this.sagaRepository = sagaRepository;
+        this.sagaTimeoutSeconds = sagaTimeoutSeconds;
     }
     
     @CircuitBreaker(name = "paymentService", fallbackMethod = "fallbackProcessPayment")
     @Retry(name = "paymentService")
+    @Transactional
     public PaymentResponse processPayment(PaymentRequest request, String idempotencyKey) {
         long startTime = System.currentTimeMillis();
         
@@ -48,16 +54,24 @@ public class PaymentService {
             
             String paymentId = UUID.randomUUID().toString();
             
-            // Append to ledger (debit/credit)
-            String transactionId = ledgerService.appendEntry(paymentId, request);
+            // Criar estado inicial da SAGA
+            SagaState saga = new SagaState();
+            saga.setPaymentId(paymentId);
+            saga.setStatus(SagaState.SagaStatus.PROCESSING);
+            saga.setAccountId(request.getAccountId());
+            saga.setAmount(request.getAmount().toString());
+            saga.setCurrency(request.getCurrency());
+            saga.setLedgerCompleted(false);
+            saga.setBalanceCompleted(false);
+            saga.setNotificationSent(false);
+            // Definir timeout: agora + timeout configurado
+            saga.setTimeoutAt(Instant.now().plusSeconds(sagaTimeoutSeconds));
+            sagaRepository.save(saga);
             
-            // Update balance projection
-            balanceService.updateBalance(request.getAccountId(), request.getAmount());
+            // Publicar evento de início da SAGA (dispara processamento assíncrono)
+            eventPublisher.publishPaymentInitiated(paymentId, request);
             
-            // Publish notification event
-            eventPublisher.publishPaymentCreated(paymentId, request);
-            
-            PaymentResponse response = new PaymentResponse(paymentId, "PROCESSED");
+            PaymentResponse response = new PaymentResponse(paymentId, "PROCESSING");
             
             // Store for idempotency
             if (idempotencyKey != null) {
@@ -65,7 +79,7 @@ public class PaymentService {
             }
             
             long latency = System.currentTimeMillis() - startTime;
-            logger.info("Payment processed successfully: paymentId={}, latency_ms={}", paymentId, latency);
+            logger.info("Payment initiated with SAGA: paymentId={}, latency_ms={}", paymentId, latency);
             
             return response;
             

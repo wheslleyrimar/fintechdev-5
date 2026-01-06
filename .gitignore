@@ -1,0 +1,33 @@
+# Build artifacts
+target/
+*.class
+*.jar
+*.war
+*.ear
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.iml
+*.swp
+*.swo
+*~
+
+# Node
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+*.log
+
+# Temporary files
+*.tmp
+*.bak
+*.cache
+

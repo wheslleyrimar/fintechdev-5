@@ -1,6 +1,8 @@
 package com.fintechdev.payment.config;
 
-import com.fintechdev.payment.dto.PaymentResponse;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.jsontype.impl.LaissezFaireSubTypeValidator;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
@@ -16,7 +18,16 @@ public class RedisConfig {
         RedisTemplate<String, Object> template = new RedisTemplate<>();
         template.setConnectionFactory(connectionFactory);
         template.setKeySerializer(new StringRedisSerializer());
-        template.setValueSerializer(new GenericJackson2JsonRedisSerializer());
+        
+        // Configurar ObjectMapper com suporte a Java 8 time types
+        ObjectMapper objectMapper = new ObjectMapper();
+        objectMapper.registerModule(new JavaTimeModule());
+        objectMapper.activateDefaultTyping(
+            LaissezFaireSubTypeValidator.instance,
+            com.fasterxml.jackson.databind.ObjectMapper.DefaultTyping.NON_FINAL
+        );
+        
+        template.setValueSerializer(new GenericJackson2JsonRedisSerializer(objectMapper));
         return template;
     }
 }
