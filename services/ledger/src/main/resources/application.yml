@@ -4,7 +4,7 @@ server:
 spring:
   application:
     name: ledger-service
-  
+
   rabbitmq:
     host: ${RABBITMQ_HOST:localhost}
     port: ${RABBITMQ_PORT:5672}
@@ -37,10 +37,13 @@ management:
       prometheus:
         enabled: true
   tracing:
+    enabled: true
     sampling:
       probability: 1.0
-    zipkin:
-      base-url: ${ZIPKIN_BASE_URL:http://localhost:9411}
+    export:
+      zipkin:
+        endpoint: ${ZIPKIN_EXPORTER_ENDPOINT:http://localhost:9411/api/v2/spans}
+        secondary-endpoint: ${ZIPKIN_EXPORTER_SECONDARY:}
 
 logging:
   level:

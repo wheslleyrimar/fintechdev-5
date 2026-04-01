@@ -1,0 +1,24 @@
+# Zipkin (apps) → collector → OpenZipkin (zipkin exporter) + Jaeger (otlphttp na 4318, não gRPC)
+receivers:
+  zipkin:
+    endpoint: 0.0.0.0:9411
+
+processors:
+  batch:
+    timeout: 1s
+    send_batch_size: 512
+
+exporters:
+  zipkin:
+    endpoint: http://zipkin:9411/api/v2/spans
+  otlphttp:
+    endpoint: http://jaeger:4318
+    tls:
+      insecure: true
+
+service:
+  pipelines:
+    traces:
+      receivers: [zipkin]
+      processors: [batch]
+      exporters: [zipkin, otlphttp]

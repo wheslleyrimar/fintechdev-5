@@ -2,15 +2,52 @@
 
 ## Índice
 
-1. [Visão Geral](#visão-geral)
-2. [Linguagens e Tecnologias](#linguagens-e-tecnologias)
-3. [Padrões Arquiteturais](#padrões-arquiteturais)
-4. [Arquitetura do Sistema](#arquitetura-do-sistema)
-5. [Fluxo Completo de Processamento](#fluxo-completo-de-processamento)
-6. [Como Executar](#como-executar)
-7. [Como Visualizar e Monitorar](#como-visualizar-e-monitorar)
-8. [Testando o Sistema](#testando-o-sistema)
-9. [Troubleshooting](#troubleshooting)
+1. [Introdução](#introdução)
+2. [Visão Geral](#visão-geral)
+3. [Linguagens e Tecnologias](#linguagens-e-tecnologias)
+4. [Padrões Arquiteturais](#padrões-arquiteturais)
+5. [Arquitetura do Sistema](#arquitetura-do-sistema)
+6. [Fluxo Completo de Processamento](#fluxo-completo-de-processamento)
+7. [Como Executar](#como-executar)
+8. [Como Visualizar e Monitorar](#como-visualizar-e-monitorar)
+9. [Testando o Sistema](#testando-o-sistema)
+10. [Troubleshooting](#troubleshooting)
+
+---
+
+## Introdução
+
+Este repositório sobe um **ecossistema de pagamentos** via Docker Compose: vários microsserviços trocam mensagens por filas, persistem dados onde faz sentido e expõem **observabilidade** (métricas e traces) para você acompanhar o fluxo ponta a ponta.
+
+### Microsserviços — papel e uso
+
+| Componente | O que faz | Como entra no fluxo |
+|------------|-----------|---------------------|
+| **Payment Service** (Java, porta **8080**) | API HTTP de pagamentos: valida, aplica idempotência, orquestra a SAGA e **publica eventos** no RabbitMQ. | Ponto de entrada do cliente (`POST /payments`). Usa Redis para idempotência e PostgreSQL para estado da SAGA; envia traces Zipkin para Zipkin e para o Collector. |
+| **Ledger Service** (Java, porta **8081**) | **Livro-razão**: registra entradas imutáveis no PostgreSQL (banco `ledger`). | Consome filas/tópicos do RabbitMQ (ex.: append de lançamentos), reage aos eventos de pagamento e também exporta traces. |
+| **Balance Service** (Go) | **Read model** de saldos em memória, otimizado para leitura rápida. | Consome eventos de atualização de saldo do RabbitMQ e mantém a projeção localmente (sem porta HTTP exposta no compose padrão). |
+| **Notification Service** (Node/TypeScript, porta **8082**) | Simula notificações (e-mail/SMS/webhook) após eventos de pagamento. | Consome filas de notificação e pode expor endpoints auxiliares conforme a implementação. |
+| **Antifraud Service** (Go) | Análise antifraude em cima dos **mesmos** eventos de pagamento (fanout). | Inscrito no exchange fanout `payments`, processa cada pagamento em paralelo aos outros consumidores, sem bloquear o fluxo principal. |
+
+### Infraestrutura de dados e mensageria
+
+| Ferramenta | O que faz | Como é usada aqui |
+|------------|-----------|-------------------|
+| **RabbitMQ** | Broker AMQP com management UI (**15672**). | Exchanges e filas ligam Payment → Ledger, Balance, Notification e Antifraud; desacopla produtores e consumidores. |
+| **Redis** | Armazenamento chave-valor em memória. | Payment Service guarda respostas por `Idempotency-Key` para não processar o mesmo pedido duas vezes. |
+| **PostgreSQL** | Banco relacional. | Dois contextos: banco `payment` (estado da SAGA no Payment) e banco `ledger` (persistência do Ledger Service), com script de init no compose. |
+
+### Observabilidade — ferramentas e encadeamento
+
+| Ferramenta | O que faz | Como é usada aqui |
+|------------|-----------|-------------------|
+| **Zipkin** (UI **9411**) | Armazena e consulta **traces** no formato Zipkin. | Os serviços Java enviam spans para o Zipkin direto e também para o Collector (endpoint secundário), para unificar o pipeline. |
+| **OpenTelemetry Collector** | Recebe telemetria e **encaminha** para um ou mais backends. | Recebe spans no endpoint Zipkin (**9411** no collector) e **replica** o fluxo para Zipkin e para Jaeger (OTLP), evitando instrumentar cada backend nos apps. |
+| **Jaeger** (UI **16686**) | Visualização de traces; neste setup aceita **OTLP** (**4317**/ **4318**). | Alimentado pelo Collector: mesma jornada de request vista em outra UI, útil para comparar ou demonstrar OTLP. |
+| **Prometheus** (**9090**) | Coleta e armazena **métricas** time-series (pull HTTP). | Faz scrape dos endpoints `/actuator/prometheus` (e equivalentes) conforme `observability/prometheus.yml`. |
+| **Grafana** (**3000**) | Dashboards sobre Prometheus (e outras fontes). | Provisionamento em `observability/grafana/` aponta para o Prometheus local para gráficos de saúde e carga dos serviços. |
+
+Os detalhes de portas, variáveis de ambiente e fluxo de eventos estão nas seções [Como Executar](#como-executar), [Arquitetura do Sistema](#arquitetura-do-sistema) e [Como Visualizar e Monitorar](#como-visualizar-e-monitorar).
 
 ---
 
@@ -48,8 +85,9 @@ Este projeto demonstra uma **arquitetura de microsserviços** para processamento
 - **PostgreSQL**: Banco de dados relacional para ledger (entradas imutáveis)
 - **Prometheus**: Coleta de métricas
 - **Grafana**: Visualização de métricas
-- **Jaeger**: Distributed tracing
-- **Zipkin**: Distributed tracing (alternativa)
+- **Zipkin**: UI de traces em **http://localhost:9411**
+- **Jaeger**: UI em **http://localhost:16686** (ingestão **OTLP HTTP** na **4318**, alimentada pelo OpenTelemetry Collector)
+- **OpenTelemetry Collector**: recebe spans Zipkin dos serviços Java e **replica** para Zipkin e Jaeger
 
 ---
 
@@ -404,7 +442,7 @@ sequenceDiagram
 ### Pré-requisitos
 
 - **Docker** e **Docker Compose** instalados
-- **Portas disponíveis**: 8080, 8081, 8082, 5432, 5672, 6379, 9090, 3000, 15672, 16686, 9411
+- **Portas disponíveis**: 8080, 8081, 8082, 5432, 5672, 6379, 9090, 3000, 15672, 16686, 4317, 4318, 9411
 
 ### Passo 1: Verificar Docker
 
@@ -433,8 +471,9 @@ docker compose up --build
    - PostgreSQL (ledger)
    - Prometheus (métricas)
    - Grafana (dashboards)
-   - Jaeger (tracing)
-   - Zipkin (tracing)
+   - Zipkin (UI de traces na porta 9411)
+   - Jaeger (UI em 16686; OTLP HTTP 4318 para o collector)
+   - OpenTelemetry Collector (fan-out Zipkin → Zipkin + Jaeger)
    - Payment Service
    - Ledger Service
    - Balance Service
@@ -584,9 +623,9 @@ antifraud-service | {"service":"antifraud","event":"processed","body":"{...}"}
 
 #### Como usar:
 1. Acesse http://localhost:9090
-2. Vá em **Status** → **Targets** para ver serviços sendo monitorados
+2. Vá em **Status** → **Targets** para ver serviços sendo monitorados (inclui **payment-service** e **ledger-service** em `/actuator/prometheus`)
 3. Use **Graph** para criar queries PromQL
-4. Exemplo de query: `up` (mostra serviços online)
+4. Exemplo de query: `up` (mostra jobs online); `jvm_memory_used_bytes` para heap dos serviços Java
 
 ### 4. **Grafana**
 
@@ -596,38 +635,63 @@ antifraud-service | {"service":"antifraud","event":"processed","body":"{...}"}
 - Usuário: `admin`
 - Senha: `admin` (será solicitado mudança na primeira vez)
 
-#### Configurar Prometheus como Data Source:
-1. Acesse http://localhost:3000
-2. Vá em **Configuration** → **Data Sources**
-3. Clique em **Add data source**
-4. Selecione **Prometheus**
-5. URL: `http://prometheus:9090`
-6. Clique em **Save & Test**
+#### Data source Prometheus:
+O Compose monta `observability/grafana/provisioning` — o Grafana já inicia com o data source **Prometheus** apontando para `http://prometheus:9090`. Se precisar ajustar: **Configuration** → **Data Sources**.
 
 #### Criar Dashboard:
 1. Vá em **Dashboards** → **New Dashboard**
 2. Adicione painéis com métricas do Prometheus
 
-### 5. **Jaeger**
+### 5. **Traces: Zipkin, Jaeger e OpenTelemetry Collector**
 
-**URL**: http://localhost:16686
+Os serviços **payment** e **ledger** usam **Micrometer + Brave** com envio **duplo** (auto-configuração `com.fintechdev.zipkin.ZipkinFanoutAutoConfiguration`, fora do pacote escaneado da aplicação):
 
-#### Como usar:
-1. Acesse http://localhost:16686
-2. Selecione o serviço no dropdown
-3. Clique em **Find Traces**
-4. Veja traces distribuídos entre serviços
+1. **Primário** — `ZIPKIN_EXPORTER_ENDPOINT` → **OpenZipkin** (`http://zipkin:9411/api/v2/spans`): é o que alimenta o armazenamento da **UI Zipkin**.
+2. **Secundário** — `ZIPKIN_EXPORTER_SECONDARY` → **OpenTelemetry Collector** (`http://otel-collector:9411/api/v2/spans`): o collector reenvia para o **Jaeger** em OTLP HTTP (`http://jaeger:4318`).
 
-### 6. **Zipkin**
+Assim a UI Zipkin deixa de depender só do hop pelo collector (onde spans podiam não persistir corretamente no servidor Zipkin).
 
-**URL**: http://localhost:9411
+> **Importante:** Os nomes de serviço vêm do `spring.application.name` (`payment-service`, `ledger-service`). Eles **só aparecem depois** de existir tráfego que gere spans (por exemplo HTTP no Payment). Abra as UIs **depois** de rodar os comandos abaixo e use janela de tempo **última hora**.
 
-#### Como usar:
-1. Acesse http://localhost:9411
-2. Clique em **Run Query** para ver traces
-3. Explore dependências entre serviços
+#### Gerar traces (terminal)
 
-### 7. **PostgreSQL**
+```bash
+# Vários POSTs geram vários traces no payment-service
+curl -sS -X POST http://localhost:8080/payments \
+  -H "Content-Type: application/json" \
+  -d '{"accountId":"acc-zipkin-jaeger","amount":1.00,"currency":"BRL"}'
+
+# Health também costuma gerar span HTTP no Payment
+curl -sS http://localhost:8080/actuator/health
+
+# Ledger expõe actuator (spans ao bater no Tomcat)
+curl -sS http://localhost:8081/actuator/health
+```
+
+Aguarde **5–15 segundos** (batch do collector) e atualize a página da UI.
+
+#### Como consultar no **Zipkin** — http://localhost:9411
+
+1. **Reconstrua as imagens** após mudanças de tracing: `docker compose up --build -d` (payment e ledger incluem o fan-out para Zipkin + collector).
+2. Abra **http://localhost:9411** no navegador.
+3. Na busca, em **Service Name**, escolha **`payment-service`** ou **`ledger-service`** (a lista só preenche depois de haver spans).
+4. Intervalo: **Last 1 hour**.
+5. **Obrigatório:** clique em **RUN QUERY** / **SEARCH**. Só preencher a URL com `?serviceName=...` **não** executa a busca na Lens — por isso a tela pode ficar vazia com o texto “Please select criteria…”.
+6. Abra um trace na lista para ver os spans.
+
+Dica: após `curl` ou POST de pagamento, espere alguns segundos (reporter em batch) e rode a busca de novo.
+
+#### Como consultar no **Jaeger** — http://localhost:16686
+
+1. Abra **http://localhost:16686**.
+2. No painel esquerdo (**Search**), em **Service**, escolha **`payment-service`** ou **`ledger-service`**.
+3. Em **Lookback**, use **Last Hour** (ou maior).
+4. Clique em **Find Traces**.
+5. Clique em uma linha da lista para abrir o detalhe do trace.
+
+Se **Service** continuar só com `jaeger-all-in-one`: o Jaeger não está recebendo spans do collector. Rode `docker compose logs otel-collector --tail=100` e procure por **`ExportFailed`**, **`error`**, ou **`http2: frame too large`** em `jaeger:4318` (indica **gRPC** na porta OTLP **HTTP** — o repo usa exporter **`otlphttp`** em `observability/otel-collector-config.yaml`). No Compose, os Java devem ter **`ZIPKIN_EXPORTER_ENDPOINT=http://zipkin:9411/api/v2/spans`** e **`ZIPKIN_EXPORTER_SECONDARY=http://otel-collector:9411/api/v2/spans`**.
+
+### 6. **PostgreSQL**
 
 Para verificar dados no ledger:
 
@@ -639,7 +703,7 @@ docker compose exec postgres psql -U postgres -d ledger
 \dt
 
 # Ver entradas do ledger
-SELECT * FROM ledger_entry ORDER BY created_at DESC LIMIT 10;
+SELECT * FROM ledger_entries ORDER BY created_at DESC LIMIT 10;
 
 # Sair
 \q
@@ -742,7 +806,7 @@ Balance updated: accountId=acc-123, operation=DEBIT, amount=100.50, newBalance=-
 ### Teste 5: Verificar entradas no Ledger
 
 ```bash
-docker compose exec postgres psql -U postgres -d ledger -c "SELECT * FROM ledger_entry ORDER BY created_at DESC LIMIT 5;"
+docker compose exec postgres psql -U postgres -d ledger -c "SELECT * FROM ledger_entries ORDER BY created_at DESC LIMIT 5;"
 ```
 
 **Resultado esperado:**
@@ -757,7 +821,7 @@ docker compose exec postgres psql -U postgres -d ledger -c "SELECT * FROM ledger
 
 ```bash
 # Conectar ao PostgreSQL do Payment Service
-docker compose exec postgres psql -U postgres -d payment -c "SELECT payment_id, status, ledger_completed, balance_completed, failure_reason, created_at FROM saga_state ORDER BY created_at DESC LIMIT 5;"
+docker compose exec postgres psql -U postgres -d payment -c "SELECT payment_id, status, ledger_completed, balance_completed, failure_reason, created_at FROM saga_states ORDER BY created_at DESC LIMIT 5;"
 ```
 
 **Resultado esperado:**
@@ -840,6 +904,19 @@ docker compose up --build
    ```
 2. Pare o processo ou altere a porta no `docker-compose.yml`
 
+### Problema: `Bind for 0.0.0.0:9411 failed: port is already allocated`
+
+A porta **9411** é usada pelo serviço **zipkin** (UI). Outro processo ou um **container órfão** antigo pode estar ocupando a mesma porta.
+
+**Solução:**
+
+```bash
+docker compose down --remove-orphans
+docker compose up --build -d
+```
+
+O flag `--remove-orphans` remove containers de serviços que não existem mais no `docker-compose.yml`.
+
 ### Limpar tudo e começar do zero
 
 ```bash
@@ -902,7 +979,7 @@ Em caso de dúvidas ou problemas:
 1. Verifique os logs: `docker compose logs -f`
 2. Verifique a saúde dos serviços: RabbitMQ Management UI
 3. Consulte este README para troubleshooting
-4. Verifique o estado da SAGA no PostgreSQL: `SELECT * FROM saga_state`
+4. Verifique o estado da SAGA no PostgreSQL: `SELECT * FROM saga_states`
 
 ---
 

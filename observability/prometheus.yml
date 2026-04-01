@@ -6,3 +6,12 @@ scrape_configs:
     static_configs:
       - targets: ['localhost:9090']
 
+  - job_name: 'payment-service'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets: ['payment-service:8080']
+
+  - job_name: 'ledger-service'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets: ['ledger-service:8081']

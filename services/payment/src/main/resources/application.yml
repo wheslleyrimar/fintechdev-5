@@ -4,7 +4,7 @@ server:
 spring:
   application:
     name: payment-service
-  
+
   rabbitmq:
     host: ${RABBITMQ_HOST:localhost}
     port: ${RABBITMQ_PORT:5672}
@@ -41,8 +41,14 @@ management:
       prometheus:
         enabled: true
   tracing:
+    enabled: true
     sampling:
       probability: 1.0
+    export:
+      zipkin:
+        endpoint: ${ZIPKIN_EXPORTER_ENDPOINT:http://localhost:9411/api/v2/spans}
+        # No Docker: Zipkin (UI) + OpenTelemetry Collector (Jaeger). Em branco = só o endpoint acima.
+        secondary-endpoint: ${ZIPKIN_EXPORTER_SECONDARY:}
 
 resilience4j:
   circuitbreaker:
@@ -72,4 +78,3 @@ logging:
 saga:
   timeout:
     seconds: 30  # Timeout de 30 segundos para processamento completo
-

@@ -34,19 +34,29 @@ services:
       retries: 5
     command: postgres -c max_connections=200
 
-  jaeger:
-    image: jaegertracing/all-in-one:1.55
-    ports: ["16686:16686","4317:4317"]
-
   zipkin:
     image: openzipkin/zipkin:latest
-    ports: ["9411:9411"]
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:9411/health || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 60s
+    ports:
+      - "9411:9411"
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.55
+    environment:
+      # Sem isso o all-in-one pode não aceitar OTLP nas portas 4317/4318 (UI só mostra jaeger-all-in-one).
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686"
+      - "4317:4317"
+      - "4318:4318"
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.96.0
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./observability/otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
+    depends_on:
+      - zipkin
+      - jaeger
 
   prometheus:
     image: prom/prometheus
@@ -57,6 +67,10 @@ services:
   grafana:
     image: grafana/grafana
     ports: ["3000:3000"]
+    depends_on:
+      - prometheus
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
 
   payment-service:
     build: ./services/payment
@@ -73,6 +87,8 @@ services:
       - POSTGRES_DB=payment
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres
+      - ZIPKIN_EXPORTER_ENDPOINT=http://zipkin:9411/api/v2/spans
+      - ZIPKIN_EXPORTER_SECONDARY=http://otel-collector:9411/api/v2/spans
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -80,6 +96,10 @@ services:
         condition: service_healthy
       postgres:
         condition: service_healthy
+      zipkin:
+        condition: service_started
+      otel-collector:
+        condition: service_started
 
   ledger-service:
     build: ./services/ledger
@@ -94,13 +114,16 @@ services:
       - POSTGRES_DB=ledger
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres
-      - ZIPKIN_BASE_URL=http://zipkin:9411
+      - ZIPKIN_EXPORTER_ENDPOINT=http://zipkin:9411/api/v2/spans
+      - ZIPKIN_EXPORTER_SECONDARY=http://otel-collector:9411/api/v2/spans
     depends_on:
       rabbitmq:
         condition: service_healthy
       postgres:
         condition: service_healthy
       zipkin:
+        condition: service_started
+      otel-collector:
         condition: service_started
 
   balance-service:
